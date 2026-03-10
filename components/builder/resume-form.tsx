@@ -6,24 +6,30 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Wand2, Loader2 } from "lucide-react";
+import { Wand2, Loader2, FileCode } from "lucide-react";
 import type { ResumeBuilderInput } from "@/types";
 
 interface ResumeFormProps {
   onGenerate: (input: ResumeBuilderInput) => void;
+  onGenerateLatex: (input: ResumeBuilderInput) => void;
   isGenerating: boolean;
+  isGeneratingLatex: boolean;
 }
 
-export function ResumeForm({ onGenerate, isGenerating }: ResumeFormProps) {
+export function ResumeForm({ onGenerate, onGenerateLatex, isGenerating, isGeneratingLatex }: ResumeFormProps) {
   const [form, setForm] = useState<ResumeBuilderInput>({
     name: "",
     email: "",
     phone: "",
+    github: "",
+    linkedin: "",
+    portfolio: "",
     summary: "",
     skills: "",
     experience: "",
     education: "",
     projects: "",
+    courses: "",
     certifications: "",
     jobDescription: "",
   });
@@ -82,6 +88,36 @@ export function ResumeForm({ onGenerate, isGenerating }: ResumeFormProps) {
               placeholder="+1 (555) 000-0000"
               value={form.phone}
               onChange={(e) => updateField("phone", e.target.value)}
+              className="bg-white/80"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="github">GitHub</Label>
+            <Input
+              id="github"
+              placeholder="github.com/username"
+              value={form.github}
+              onChange={(e) => updateField("github", e.target.value)}
+              className="bg-white/80"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="linkedin">LinkedIn</Label>
+            <Input
+              id="linkedin"
+              placeholder="linkedin.com/in/username"
+              value={form.linkedin}
+              onChange={(e) => updateField("linkedin", e.target.value)}
+              className="bg-white/80"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="portfolio">Portfolio</Label>
+            <Input
+              id="portfolio"
+              placeholder="yourportfolio.com"
+              value={form.portfolio}
+              onChange={(e) => updateField("portfolio", e.target.value)}
               className="bg-white/80"
             />
           </div>
@@ -149,7 +185,7 @@ export function ResumeForm({ onGenerate, isGenerating }: ResumeFormProps) {
         <Label htmlFor="experience">Work Experience</Label>
         <Textarea
           id="experience"
-          placeholder="Describe your work experience (include company, role, dates, and responsibilities)..."
+          placeholder="Describe your work experience (company, role, dates, and what you built/achieved)..."
           value={form.experience}
           onChange={(e) => updateField("experience", e.target.value)}
           className="min-h-[150px] bg-white/80"
@@ -183,10 +219,27 @@ export function ResumeForm({ onGenerate, isGenerating }: ResumeFormProps) {
         <Label htmlFor="projects">Projects</Label>
         <Textarea
           id="projects"
-          placeholder="Notable projects (include name, description, and technologies used)..."
+          placeholder="Notable projects (name, tech stack, what it does, your engineering contribution)..."
           value={form.projects}
           onChange={(e) => updateField("projects", e.target.value)}
           className="min-h-[100px] bg-white/80"
+        />
+      </motion.div>
+
+      {/* Courses */}
+      <motion.div
+        className="space-y-1.5"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.32 }}
+      >
+        <Label htmlFor="courses">Relevant Courses</Label>
+        <Textarea
+          id="courses"
+          placeholder="List relevant coursework (e.g., Data Structures, Machine Learning, Operating Systems)..."
+          value={form.courses}
+          onChange={(e) => updateField("courses", e.target.value)}
+          className="min-h-[60px] bg-white/80"
         />
       </motion.div>
 
@@ -207,24 +260,46 @@ export function ResumeForm({ onGenerate, isGenerating }: ResumeFormProps) {
         />
       </motion.div>
 
-      <Button
-        type="submit"
-        size="lg"
-        disabled={!isValid || isGenerating}
-        className="w-full"
-      >
-        {isGenerating ? (
-          <>
-            <Loader2 className="mr-2 w-5 h-5 animate-spin" />
-            Generating Resume...
-          </>
-        ) : (
-          <>
-            <Wand2 className="mr-2 w-5 h-5" />
-            Generate Tailored Resume
-          </>
-        )}
-      </Button>
+      <div className="flex gap-3">
+        <Button
+          type="submit"
+          size="lg"
+          disabled={!isValid || isGenerating || isGeneratingLatex}
+          className="flex-1"
+        >
+          {isGenerating ? (
+            <>
+              <Loader2 className="mr-2 w-5 h-5 animate-spin" />
+              Generating Resume...
+            </>
+          ) : (
+            <>
+              <Wand2 className="mr-2 w-5 h-5" />
+              Generate Resume
+            </>
+          )}
+        </Button>
+        <Button
+          type="button"
+          size="lg"
+          variant="outline"
+          disabled={!isValid || isGenerating || isGeneratingLatex}
+          onClick={() => onGenerateLatex(form)}
+          className="flex-1"
+        >
+          {isGeneratingLatex ? (
+            <>
+              <Loader2 className="mr-2 w-5 h-5 animate-spin" />
+              Generating LaTeX...
+            </>
+          ) : (
+            <>
+              <FileCode className="mr-2 w-5 h-5" />
+              Generate LaTeX
+            </>
+          )}
+        </Button>
+      </div>
     </form>
   );
 }

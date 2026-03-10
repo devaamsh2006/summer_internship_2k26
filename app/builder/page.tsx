@@ -18,7 +18,11 @@ import type { ResumeBuilderInput, GeneratedResume } from "@/types";
 export default function BuilderPage() {
   const [generatedResume, setGeneratedResume] =
     useState<GeneratedResume | null>(null);
+  const [latexCode, setLatexCode] = useState<string | null>(null);
+  const [latexPdfBase64, setLatexPdfBase64] = useState<string | null>(null);
+  const [atsKeywords, setAtsKeywords] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isGeneratingLatex, setIsGeneratingLatex] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,6 +52,71 @@ export default function BuilderPage() {
       setIsGenerating(false);
     }
   };
+
+  const handleGenerateLatex = async (input: ResumeBuilderInput) => {
+    setIsGeneratingLatex(true);
+    setError(null);
+    setLatexCode(null);
+    setLatexPdfBase64(null);
+    setAtsKeywords([]);
+
+    try {
+      const response = await fetch("/api/generate-latex", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to generate LaTeX resume.");
+      }
+
+      setLatexCode(result.data.latex);
+      setLatexPdfBase64(result.data.pdf || null);
+      setAtsKeywords(result.data.atsKeywords || []);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Failed to generate LaTeX resume."
+      );
+    } finally {
+      setIsGeneratingLatex(false);
+    }
+  };
+
+  const handleExportLatex = useCallback(() => {
+    if (!latexCode) return;
+    const blob = new Blob([latexCode], { type: "application/x-tex" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tailored-resume.tex";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [latexCode]);
+
+  const handleCopyLatex = useCallback(() => {
+    if (!latexCode) return;
+    navigator.clipboard.writeText(latexCode);
+  }, [latexCode]);
+
+  const handleDownloadLatexPDF = useCallback(() => {
+    if (!latexPdfBase64) return;
+    const byteCharacters = atob(latexPdfBase64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tailored-resume.pdf";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [latexPdfBase64]);
 
   const handleExportPDF = useCallback(async () => {
     if (!generatedResume) return;
@@ -86,6 +155,7 @@ export default function BuilderPage() {
         { text: generatedResume.sections.experience, size: 10, bold: false },
         { text: generatedResume.sections.education, size: 10, bold: false },
         { text: generatedResume.sections.projects, size: 10, bold: false },
+        { text: generatedResume.sections.courses, size: 10, bold: false },
         { text: generatedResume.sections.certifications, size: 10, bold: false },
       ];
 
@@ -142,6 +212,7 @@ export default function BuilderPage() {
       addSection(generatedResume.sections.experience);
       addSection(generatedResume.sections.education);
       addSection(generatedResume.sections.projects);
+      addSection(generatedResume.sections.courses);
       addSection(generatedResume.sections.certifications);
 
       const doc = new Document({
@@ -203,7 +274,9 @@ export default function BuilderPage() {
                 <CardContent>
                   <ResumeForm
                     onGenerate={handleGenerate}
+                    onGenerateLatex={handleGenerateLatex}
                     isGenerating={isGenerating}
+                    isGeneratingLatex={isGeneratingLatex}
                   />
                 </CardContent>
               </Card>
@@ -225,8 +298,14 @@ export default function BuilderPage() {
                 <CardContent>
                   <ResumePreview
                     resume={generatedResume}
+                    latexCode={latexCode}
+                    latexPdfBase64={latexPdfBase64}
+                    atsKeywords={atsKeywords}
                     onExportPDF={handleExportPDF}
                     onExportDOCX={handleExportDOCX}
+                    onExportLatex={handleExportLatex}
+                    onCopyLatex={handleCopyLatex}
+                    onDownloadLatexPDF={handleDownloadLatexPDF}
                     isExporting={isExporting}
                   />
                 </CardContent>

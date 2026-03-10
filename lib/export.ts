@@ -54,9 +54,10 @@ export async function exportToPDF(resume: GeneratedResume): Promise<void> {
 
   addSection("Professional Summary", s.summary);
   addSection("Experience", s.experience);
-  addSection("Skills", s.skills);
+  addSection("Technical Skills", s.skills);
   addSection("Education", s.education);
   addSection("Projects", s.projects);
+  addSection("Courses", s.courses);
   addSection("Certifications", s.certifications);
 
   doc.save("optimized-resume.pdf");
@@ -121,9 +122,10 @@ export async function exportToDOCX(resume: GeneratedResume): Promise<void> {
 
   addSection("Professional Summary", s.summary);
   addSection("Experience", s.experience);
-  addSection("Skills", s.skills);
+  addSection("Technical Skills", s.skills);
   addSection("Education", s.education);
   addSection("Projects", s.projects);
+  addSection("Courses", s.courses);
   addSection("Certifications", s.certifications);
 
   const docFile = new Document({

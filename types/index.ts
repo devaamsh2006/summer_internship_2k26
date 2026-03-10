@@ -115,11 +115,15 @@ export interface ResumeBuilderInput {
   name: string;
   email: string;
   phone: string;
+  github: string;
+  linkedin: string;
+  portfolio: string;
   summary: string;
   skills: string;
   experience: string;
   education: string;
   projects: string;
+  courses: string;
   certifications: string;
   jobDescription: string;
 }
@@ -133,6 +137,48 @@ export interface GeneratedResume {
     experience: string;
     education: string;
     projects: string;
+    courses: string;
     certifications: string;
   };
+}
+
+// ─── LaTeX Resume Generator Types ───────────────────────────────────────────
+
+export interface LaTeXEducationEntry {
+  degree: string;
+  institution: string;
+  year: string;
+  detail: string; // e.g. "CGPA: 9.13"
+}
+
+export interface LaTeXSkillCategory {
+  category: string;
+  items: string;
+}
+
+export interface LaTeXProjectEntry {
+  name: string;
+  description: string;
+  technologies: string;
+  githubUrl?: string;
+}
+
+export interface LaTeXExperienceEntry {
+  title: string;
+  bullets: string[];
+}
+
+export interface LaTeXResumeData {
+  name: string;
+  location: string;
+  phone: string;
+  email: string;
+  links: { label: string; url: string }[];
+  education: LaTeXEducationEntry[];
+  skills: LaTeXSkillCategory[];
+  projects: LaTeXProjectEntry[];
+  experience: LaTeXExperienceEntry[];
+  courses: string[];
+  achievements: string[];
+  extraCurricular: string[];
 }
