@@ -6,17 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Wand2, Loader2, FileCode } from "lucide-react";
+import { Wand2, Loader2 } from "lucide-react";
 import type { ResumeBuilderInput } from "@/types";
 
 interface ResumeFormProps {
   onGenerate: (input: ResumeBuilderInput) => void;
-  onGenerateLatex: (input: ResumeBuilderInput) => void;
   isGenerating: boolean;
-  isGeneratingLatex: boolean;
 }
 
-export function ResumeForm({ onGenerate, onGenerateLatex, isGenerating, isGeneratingLatex }: ResumeFormProps) {
+export function ResumeForm({ onGenerate, isGenerating }: ResumeFormProps) {
   const [form, setForm] = useState<ResumeBuilderInput>({
     name: "",
     email: "",
@@ -264,7 +262,7 @@ export function ResumeForm({ onGenerate, onGenerateLatex, isGenerating, isGenera
         <Button
           type="submit"
           size="lg"
-          disabled={!isValid || isGenerating || isGeneratingLatex}
+          disabled={!isValid || isGenerating}
           className="flex-1"
         >
           {isGenerating ? (
@@ -276,26 +274,6 @@ export function ResumeForm({ onGenerate, onGenerateLatex, isGenerating, isGenera
             <>
               <Wand2 className="mr-2 w-5 h-5" />
               Generate Resume
-            </>
-          )}
-        </Button>
-        <Button
-          type="button"
-          size="lg"
-          variant="outline"
-          disabled={!isValid || isGenerating || isGeneratingLatex}
-          onClick={() => onGenerateLatex(form)}
-          className="flex-1"
-        >
-          {isGeneratingLatex ? (
-            <>
-              <Loader2 className="mr-2 w-5 h-5 animate-spin" />
-              Generating LaTeX...
-            </>
-          ) : (
-            <>
-              <FileCode className="mr-2 w-5 h-5" />
-              Generate LaTeX
             </>
           )}
         </Button>

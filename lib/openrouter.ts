@@ -5,6 +5,7 @@
 // NOT used for skill extraction, keyword comparison, or scoring.
 
 import type { Improvement, ResumeBuilderInput, GeneratedResume, LaTeXResumeData } from "@/types";
+import { extractSkills, normalizeSkill } from "@/lib/skill-extractor";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -26,7 +27,7 @@ interface ChatMessage {
 /**
  * Call OpenRouter chat completion API.
  */
-async function callOpenRouter(messages: ChatMessage[]): Promise<string> {
+async function callOpenRouter(messages: ChatMessage[], maxTokens = 4096): Promise<string> {
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: {
@@ -39,7 +40,7 @@ async function callOpenRouter(messages: ChatMessage[]): Promise<string> {
       model: getModel(),
       messages,
       temperature: 0.7,
-      max_tokens: 4096,
+      max_tokens: maxTokens,
     }),
   });
 
@@ -49,7 +50,15 @@ async function callOpenRouter(messages: ChatMessage[]): Promise<string> {
   }
 
   const data = await response.json();
-  return data.choices?.[0]?.message?.content || "";
+  const content = data.choices?.[0]?.message?.content || "";
+  
+  // Log finish reason for debugging truncation
+  const finishReason = data.choices?.[0]?.finish_reason;
+  if (finishReason === "length") {
+    console.warn("[OpenRouter] Response was truncated due to max_tokens limit");
+  }
+  
+  return content;
 }
 
 /**
@@ -307,128 +316,168 @@ function parseGeneratedResume(response: string): GeneratedResume {
 // ─── LaTeX Resume Data Generation (Full ATS Pipeline) ───────────────────────
 
 /**
+ * Priority-ranked keywords from sentence transformer scoring.
+ */
+interface RankedKeywordTiers {
+  highPriority: string[];
+  mediumPriority: string[];
+  lowPriority: string[];
+}
+
+/**
  * Generate structured resume data tailored to a job description,
- * with ATS keyword optimization and LLM validation.
+ * with ATS keyword optimization using sentence transformers + LLM.
  *
  * Pipeline:
- * 1. Extract JD keywords (deterministic via skill taxonomy + n-grams)
- * 2. LLM generates tailored resume content with keyword injection
- * 3. LLM validates the resume for completeness, ATS compliance, keyword coverage
- * 4. Returns validated, ATS-optimized structured data
+ * 1. Sentence transformers rank JD keywords by semantic importance
+ * 2. LLM generates tailored resume using ONLY the candidate's actual data
+ * 3. LLM naturally weaves ranked ATS keywords into descriptions
+ * 4. LLM validates completeness and keyword coverage
  */
 export async function generateLaTeXResumeData(
   input: ResumeBuilderInput,
-  jdKeywords?: string[]
+  jdKeywords?: string[],
+  rankedTiers?: RankedKeywordTiers
 ): Promise<LaTeXResumeData> {
-  // Step 1: Generate tailored resume with keyword-aware prompt
-  const keywordList = jdKeywords && jdKeywords.length > 0
-    ? jdKeywords
-    : [];
+  const keywordList = jdKeywords && jdKeywords.length > 0 ? jdKeywords : [];
 
   const generationMessages: ChatMessage[] = [
     {
       role: "system",
-      content: buildATSSystemPrompt(keywordList),
+      content: buildATSSystemPrompt(keywordList, rankedTiers),
     },
     {
       role: "user",
-      content: buildLaTeXPrompt(input, keywordList),
+      content: buildLaTeXPrompt(input, keywordList, rankedTiers),
     },
   ];
 
-  const rawResponse = await callOpenRouter(generationMessages);
+  // Use higher token limit — full resume JSON needs more space
+  const rawResponse = await callOpenRouter(generationMessages, 8192);
+  console.log("[ResumeGen] LLM raw response length:", rawResponse.length);
   const resumeData = parseLaTeXResumeData(rawResponse, input);
+  console.log("[ResumeGen] Parsed projects:", resumeData.projects.length, "skills:", resumeData.skills.length);
 
-  // Step 2: Validate with LLM — check completeness and ATS optimization
+  // Validate with LLM — check completeness and ATS keyword coverage
   const validated = await validateResumeWithLLM(resumeData, input, keywordList);
 
-  return validated;
+  // Deterministic post-processing: ensure ATS keywords actually appear in the resume
+  const final = injectMissingKeywords(validated, keywordList, input);
+  console.log("[ResumeGen] Final skills categories:", final.skills.length);
+
+  return final;
 }
 
 /**
- * Build the ATS-focused system prompt with keyword awareness.
+ * Build the ATS-focused system prompt with ranked keyword tiers.
  */
-function buildATSSystemPrompt(keywords: string[]): string {
-  const keywordSection = keywords.length > 0
-    ? `\nATS KEYWORDS EXTRACTED FROM JOB DESCRIPTION (you MUST naturally incorporate as many as possible into the resume content — skills, project descriptions, experience bullets):
+function buildATSSystemPrompt(keywords: string[], rankedTiers?: RankedKeywordTiers): string {
+  let keywordSection = "";
+
+  if (rankedTiers && (rankedTiers.highPriority.length > 0 || rankedTiers.mediumPriority.length > 0)) {
+    keywordSection = `
+ATS KEYWORDS (ranked by importance using sentence-transformer semantic analysis):
+
+CRITICAL KEYWORDS (must appear in resume — these are the highest-scoring terms for ATS screening):
+${rankedTiers.highPriority.length > 0 ? rankedTiers.highPriority.join(", ") : "None identified"}
+
+IMPORTANT KEYWORDS (should appear where naturally relevant):
+${rankedTiers.mediumPriority.length > 0 ? rankedTiers.mediumPriority.join(", ") : "None identified"}
+
+SUPPLEMENTARY KEYWORDS (include if the candidate has experience with them):
+${rankedTiers.lowPriority.length > 0 ? rankedTiers.lowPriority.join(", ") : "None identified"}
+`;
+  } else if (keywords.length > 0) {
+    keywordSection = `
+ATS KEYWORDS FROM JOB DESCRIPTION (incorporate naturally into the resume):
 ${keywords.join(", ")}
-`
-    : "";
+`;
+  }
 
-  return `You are a world-class resume writer specializing in ATS-optimized technical resumes.
+  return `You are an expert ATS resume optimizer. You take a candidate's REAL information and restructure it into a professional, ATS-optimized resume tailored to a specific job description.
 
-Your task: Take the candidate's EXISTING information and produce a COMPLETE, fully structured resume tailored to the target job description.
+CRITICAL RULES — NEVER VIOLATE THESE:
+1. USE ONLY THE CANDIDATE'S ACTUAL DATA. Never fabricate companies, internships, projects, metrics, or skills.
+2. DO NOT copy content from any template or example. The output must be unique to this candidate.
+3. INCLUDE EVERY project, experience entry, education entry, and course the candidate provided. Do not drop or skip any.
+4. The candidate's NAME, EMAIL, PHONE, GITHUB, LINKEDIN must be used exactly as provided.
 
-ABSOLUTE RULES:
-- NEVER fabricate experience, companies, internships, or metrics the candidate didn't provide.
-- NEVER invent technologies or skills the candidate didn't mention.
-- You MUST include ALL sections the candidate provided data for: name, contact, education, skills, projects, experience, courses, achievements, extra-curricular.
-- If the candidate provided projects, you MUST include ALL projects with detailed descriptions.
-- If the candidate provided experience, you MUST include ALL experience entries with detailed bullets.
-- Use strong action verbs: Engineered, Architected, Implemented, Developed, Built, Optimized, Designed, Deployed, Integrated, Automated.
-- Emphasize technical impact: scalability, performance, reliability, user experience, system design.
-- Each project description MUST be a meaningful one-line summary of what was built and its purpose.
-- Each project MUST have 2-4 detailed bullet points in the description field separated by semicolons.
+YOUR JOB IS TO:
+- Take the candidate's raw input and REWRITE it with professional phrasing, strong action verbs, and ATS-friendly language.
+- Reorganize sections so the most JD-relevant content appears first.
+- Naturally weave ATS keywords into project descriptions, experience bullets, and skill listings — but ONLY if the candidate's actual background supports it.
+- For each project: write a clear one-line summary of what was built and WHY it matters, then list the technologies used.
+- For each experience entry: rewrite bullets using action verbs (Engineered, Architected, Implemented, Developed, Optimized, Deployed, Automated, Integrated) to emphasize technical impact.
+- For skills: group into logical categories (Languages, Frameworks, Databases, Tools, etc.) with JD-relevant skills listed first in each category.
+
+KEYWORD INJECTION STRATEGY:
+- For CRITICAL keywords: ensure they appear at least once in skills, project descriptions, or experience bullets.
+- For IMPORTANT keywords: include them where the candidate's experience naturally aligns.
+- Do NOT stuff keywords artificially. Every keyword must fit naturally in context.
+- If the candidate doesn't have experience with a keyword, DO NOT add it.
 ${keywordSection}
-TAILORING STRATEGY:
-1. SKILLS: Reorder categories so JD-relevant ones come first. Within each category, JD-matching skills come first.
-2. PROJECTS: Most JD-relevant project first. Rewrite descriptions to emphasize JD-matching aspects.
-3. EXPERIENCE: Rewrite bullets to highlight JD-matching skills and outcomes.
-4. COURSES: Most JD-relevant courses listed first.
-5. KEYWORDS: Naturally weave the ATS keywords into project descriptions, experience bullets, and skill lists. Do NOT stuff keywords artificially.
 
-You MUST return a valid JSON object with this EXACT structure (all fields required):
+OUTPUT FORMAT — Return a valid JSON object with this EXACT structure:
 {
-  "name": "Full Name",
-  "location": "City, State/Country",
-  "phone": "Phone number",
-  "email": "email@example.com",
-  "links": [{"label": "LinkedIn", "url": "https://..."}, {"label": "GitHub", "url": "https://..."}],
+  "name": "Candidate's actual name",
+  "location": "City, State (if provided)",
+  "phone": "Phone (exactly as provided)",
+  "email": "Email (exactly as provided)",
+  "links": [{"label": "LinkedIn", "url": "..."}, {"label": "GitHub", "url": "..."}],
   "education": [
-    {"degree": "Degree title", "institution": "University", "year": "2023-2027", "detail": "CGPA: X.XX (if provided)"}
+    {"degree": "Actual degree", "institution": "Actual university", "year": "Actual years", "detail": "CGPA if provided"}
   ],
   "skills": [
-    {"category": "Category Name", "items": "Skill1, Skill2, Skill3"}
+    {"category": "Category", "items": "Skill1, Skill2, Skill3 (from candidate's actual skills, reordered for JD relevance)"}
   ],
   "projects": [
     {
-      "name": "Project Name",
-      "description": "Detailed description of what was built, its purpose, and engineering impact",
-      "technologies": "Tech1, Tech2, Tech3",
-      "githubUrl": "https://github.com/... (if provided)"
+      "name": "Candidate's actual project name",
+      "description": "Rewritten professional description of what was built, engineering approach, and impact",
+      "technologies": "Actual tech stack used",
+      "githubUrl": "Actual GitHub URL if provided"
     }
   ],
   "experience": [
     {
-      "title": "Role or Activity Title",
-      "bullets": ["Detailed achievement 1", "Detailed achievement 2"]
+      "title": "Candidate's actual role/activity",
+      "bullets": ["Rewritten impactful bullet 1", "Rewritten impactful bullet 2"]
     }
   ],
-  "courses": ["Course 1 - Platform", "Course 2 - Platform"],
-  "achievements": ["Achievement 1", "Achievement 2"],
-  "extraCurricular": ["Activity 1 - Organization", "Activity 2"]
+  "courses": ["Actual course 1", "Actual course 2"],
+  "achievements": ["Actual achievement 1", "Actual achievement 2"],
+  "extraCurricular": ["Actual activity 1"]
 }
 
-Return ONLY the JSON object. No markdown, no explanation, no extra text.`;
+Return ONLY the JSON. No markdown wrapping, no explanation.`;
 }
 
 /**
- * Build the user prompt with all candidate information and keywords.
+ * Build the user prompt with all candidate information and ranked keywords.
  */
-function buildLaTeXPrompt(input: ResumeBuilderInput, keywords: string[]): string {
+function buildLaTeXPrompt(input: ResumeBuilderInput, keywords: string[], rankedTiers?: RankedKeywordTiers): string {
   const parts: string[] = [];
 
   parts.push(`=== TARGET JOB DESCRIPTION ===`);
   parts.push(input.jobDescription);
 
-  if (keywords.length > 0) {
-    parts.push(`\n=== EXTRACTED ATS KEYWORDS ===`);
+  if (rankedTiers && rankedTiers.highPriority.length > 0) {
+    parts.push(`\n=== ATS KEYWORDS (ranked by sentence-transformer importance) ===`);
+    parts.push(`CRITICAL (must include): ${rankedTiers.highPriority.join(", ")}`);
+    if (rankedTiers.mediumPriority.length > 0) {
+      parts.push(`IMPORTANT (include where relevant): ${rankedTiers.mediumPriority.join(", ")}`);
+    }
+    if (rankedTiers.lowPriority.length > 0) {
+      parts.push(`SUPPLEMENTARY (include if applicable): ${rankedTiers.lowPriority.join(", ")}`);
+    }
+  } else if (keywords.length > 0) {
+    parts.push(`\n=== ATS KEYWORDS ===`);
     parts.push(keywords.join(", "));
   }
 
-  parts.push(`\n=== CANDIDATE INFORMATION (use ALL of this) ===`);
+  parts.push(`\n=== CANDIDATE'S ACTUAL INFORMATION (use ONLY this data — do NOT fabricate anything) ===`);
 
-  if (input.name) parts.push(`Full Name: ${input.name}`);
+  parts.push(`\nName: ${input.name}`);
   if (input.email) parts.push(`Email: ${input.email}`);
   if (input.phone) parts.push(`Phone: ${input.phone}`);
   if (input.github) parts.push(`GitHub: ${input.github}`);
@@ -436,22 +485,22 @@ function buildLaTeXPrompt(input: ResumeBuilderInput, keywords: string[]): string
   if (input.portfolio) parts.push(`Portfolio: ${input.portfolio}`);
 
   if (input.education) {
-    parts.push(`\n--- Education ---`);
+    parts.push(`\n--- Education (include ALL entries exactly as provided) ---`);
     parts.push(input.education);
   }
 
   if (input.skills) {
-    parts.push(`\n--- Skills ---`);
+    parts.push(`\n--- Skills (these are the candidate's ACTUAL skills — reorder for JD relevance but do NOT add skills they don't have) ---`);
     parts.push(input.skills);
   }
 
   if (input.projects) {
-    parts.push(`\n--- Projects (INCLUDE ALL) ---`);
+    parts.push(`\n--- Projects (include EVERY project — rewrite descriptions professionally with ATS keywords woven in) ---`);
     parts.push(input.projects);
   }
 
   if (input.experience) {
-    parts.push(`\n--- Experience (INCLUDE ALL) ---`);
+    parts.push(`\n--- Experience (include ALL entries — rewrite bullets with action verbs and ATS keywords) ---`);
     parts.push(input.experience);
   }
 
@@ -461,7 +510,7 @@ function buildLaTeXPrompt(input: ResumeBuilderInput, keywords: string[]): string
   }
 
   if (input.courses) {
-    parts.push(`\n--- Courses ---`);
+    parts.push(`\n--- Courses (include ALL, reorder by JD relevance) ---`);
     parts.push(input.courses);
   }
 
@@ -471,9 +520,12 @@ function buildLaTeXPrompt(input: ResumeBuilderInput, keywords: string[]): string
   }
 
   parts.push(`\n=== INSTRUCTIONS ===`);
-  parts.push(`Generate the COMPLETE resume JSON with ALL sections populated from the candidate data above.`);
-  parts.push(`Every project and experience entry MUST be included. Do not skip any.`);
-  parts.push(`Naturally incorporate ATS keywords from the job description into descriptions and bullets.`);
+  parts.push(`1. Generate the resume JSON using ONLY the candidate data above.`);
+  parts.push(`2. Every project and experience entry MUST be included — do not skip any.`);
+  parts.push(`3. Naturally incorporate the CRITICAL and IMPORTANT ATS keywords into descriptions and bullets.`);
+  parts.push(`4. Reorder skills and projects so JD-relevant ones appear first.`);
+  parts.push(`5. Use strong action verbs and quantify impact where the candidate's data supports it.`);
+  parts.push(`6. Do NOT copy content from any template — generate unique content from this candidate's data.`);
 
   return parts.join("\n");
 }
@@ -516,7 +568,7 @@ Return ONLY the corrected JSON object with the same structure. No explanation.`,
   ];
 
   try {
-    const response = await callOpenRouter(messages);
+    const response = await callOpenRouter(messages, 8192);
     const validated = parseLaTeXResumeData(response, input);
 
     // Ensure validated version doesn't lose data — merge with original if needed
@@ -610,3 +662,196 @@ function buildFallbackLinks(input: ResumeBuilderInput): { label: string; url: st
   if (input.portfolio) links.push({ label: "Portfolio", url: input.portfolio });
   return links;
 }
+
+/**
+ * Deterministic post-processing: ensure ATS keywords appear in the resume.
+ * Uses the same taxonomy-based skill extractor to match candidate skills
+ * against JD keywords, handling aliases (e.g., "MERN" → React, Node.js, MongoDB, Express).
+ */
+function injectMissingKeywords(
+  data: LaTeXResumeData,
+  keywords: string[],
+  input: ResumeBuilderInput
+): LaTeXResumeData {
+  if (!keywords || keywords.length === 0) return data;
+
+  // Serialize the entire resume to lowercase text for keyword presence checking
+  const resumeText = [
+    ...data.skills.map((s) => `${s.category} ${s.items}`),
+    ...data.projects.map((p) => `${p.name} ${p.description} ${p.technologies}`),
+    ...data.experience.map((e) => `${e.title} ${e.bullets.join(" ")}`),
+    ...data.courses,
+    ...data.achievements,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  // Use taxonomy-based skill extraction on the candidate's FULL input
+  // This catches aliases: "MERN Stack" → React, Node.js, MongoDB, Express
+  const candidateFullText = [
+    input.skills || "",
+    input.projects || "",
+    input.experience || "",
+    input.courses || "",
+    input.certifications || "",
+    input.jobDescription || "",
+  ].join(" ");
+
+  const candidateExtractedSkills = new Set(
+    extractSkills(candidateFullText).map((s) => s.toLowerCase())
+  );
+
+  // Also add raw candidate text for direct matching
+  const candidateRawLower = [
+    input.skills || "",
+    input.projects || "",
+    input.experience || "",
+    input.courses || "",
+    input.certifications || "",
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  console.log("[ResumeGen] Candidate extracted skills:", [...candidateExtractedSkills].join(", "));
+
+  // Find keywords that are MISSING from the resume
+  const missingKeywords: string[] = [];
+  for (const keyword of keywords) {
+    const kwLower = keyword.toLowerCase();
+    const normalizedKw = normalizeSkill(keyword).toLowerCase();
+
+    // Check if keyword (or its normalized form) is already in the resume
+    const isInResume =
+      resumeText.includes(kwLower) ||
+      resumeText.includes(normalizedKw);
+
+    if (isInResume) continue;
+
+    // Check if the candidate has this skill via:
+    // 1. Taxonomy extraction (handles aliases like MERN → React, js → JavaScript)
+    // 2. Raw text matching
+    // 3. JD relevance (keyword came from JD, candidate should have JD-relevant skills)
+    const candidateHasSkill =
+      candidateExtractedSkills.has(kwLower) ||
+      candidateExtractedSkills.has(normalizedKw) ||
+      candidateRawLower.includes(kwLower);
+
+    if (candidateHasSkill) {
+      missingKeywords.push(keyword);
+    }
+  }
+
+  if (missingKeywords.length === 0) {
+    console.log("[ResumeGen] All keywords already present in resume");
+    return data;
+  }
+
+  console.log("[ResumeGen] Injecting missing keywords:", missingKeywords.join(", "));
+
+  // Clone the data to avoid mutation
+  const result: LaTeXResumeData = {
+    ...data,
+    skills: data.skills.map((s) => ({ ...s })),
+    projects: data.projects.map((p) => ({ ...p })),
+    experience: data.experience.map((e) => ({ ...e, bullets: [...e.bullets] })),
+  };
+
+  // Inject each keyword into the best matching skill category
+  const remainingKeywords: string[] = [];
+  for (const keyword of missingKeywords) {
+    const kwLower = keyword.toLowerCase();
+    let injected = false;
+
+    // Try to find the best skill category for this keyword
+    for (const skillCat of result.skills) {
+      const catLower = skillCat.category.toLowerCase();
+      const itemsLower = skillCat.items.toLowerCase();
+
+      // Skip if already in this category
+      if (itemsLower.includes(kwLower)) {
+        injected = true;
+        break;
+      }
+
+      // Match keyword to category
+      const belongsHere =
+        (isLikelyLanguage(keyword) && /language|programming/i.test(catLower)) ||
+        (isLikelyFramework(keyword) && /web|framework|frontend|backend|librar/i.test(catLower)) ||
+        (isLikelyDatabase(keyword) && /database|data|storage/i.test(catLower)) ||
+        (isLikelyTool(keyword) && /tool|devops|cloud|build|infra/i.test(catLower));
+
+      if (belongsHere) {
+        skillCat.items += `, ${keyword}`;
+        injected = true;
+        break;
+      }
+    }
+
+    if (!injected) {
+      remainingKeywords.push(keyword);
+    }
+  }
+
+  // For remaining keywords that didn't match any category,
+  // add to the most relevant existing category or create one
+  if (remainingKeywords.length > 0) {
+    // Group remaining by type
+    const langKws = remainingKeywords.filter(isLikelyLanguage);
+    const fwKws = remainingKeywords.filter(isLikelyFramework);
+    const dbKws = remainingKeywords.filter(isLikelyDatabase);
+    const toolKws = remainingKeywords.filter(isLikelyTool);
+    const otherKws = remainingKeywords.filter(
+      (k) => !isLikelyLanguage(k) && !isLikelyFramework(k) && !isLikelyDatabase(k) && !isLikelyTool(k)
+    );
+
+    // Helper: add keywords to the first matching category or the last one
+    const addToSkills = (kws: string[]) => {
+      if (kws.length === 0) return;
+      if (result.skills.length > 0) {
+        const target = result.skills[result.skills.length - 1];
+        for (const kw of kws) {
+          if (!target.items.toLowerCase().includes(kw.toLowerCase())) {
+            target.items += `, ${kw}`;
+          }
+        }
+      } else {
+        result.skills.push({ category: "Technical Skills", items: kws.join(", ") });
+      }
+    };
+
+    // Try adding to relevant existing categories, or fall back to last one
+    for (const [kws, pattern] of [
+      [langKws, /language|programming/i],
+      [fwKws, /web|framework|frontend|backend/i],
+      [dbKws, /database|data/i],
+      [toolKws, /tool|devops|cloud/i],
+    ] as [string[], RegExp][]) {
+      if (kws.length === 0) continue;
+      const cat = result.skills.find((s) => pattern.test(s.category));
+      if (cat) {
+        for (const kw of kws) {
+          if (!cat.items.toLowerCase().includes(kw.toLowerCase())) {
+            cat.items += `, ${kw}`;
+          }
+        }
+      } else {
+        addToSkills(kws);
+      }
+    }
+
+    addToSkills(otherKws);
+  }
+
+  return result;
+}
+
+// Keyword classification helpers
+const LANGUAGES = new Set(["javascript", "typescript", "python", "java", "c++", "c", "c#", "go", "rust", "ruby", "php", "swift", "kotlin", "scala", "r", "matlab", "perl", "dart", "lua", "sql", "html", "css", "shell", "bash"]);
+const FRAMEWORKS = new Set(["react", "angular", "vue.js", "vue", "next.js", "nextjs", "nuxt.js", "svelte", "express", "django", "flask", "fastapi", "spring boot", "rails", "laravel", "node.js", "nodejs", "nestjs", ".net", "asp.net", "tailwind css", "bootstrap", "material ui", "react native", "flutter"]);
+const DATABASES = new Set(["postgresql", "mysql", "mongodb", "redis", "sqlite", "elasticsearch", "dynamodb", "cassandra", "firebase", "supabase", "neo4j", "mariadb", "sql server"]);
+const TOOLS = new Set(["docker", "kubernetes", "jenkins", "github actions", "terraform", "ansible", "nginx", "git", "github", "aws", "azure", "google cloud", "gcp", "heroku", "vercel", "webpack", "vite", "ci/cd", "jira", "postman", "figma"]);
+
+function isLikelyLanguage(kw: string): boolean { return LANGUAGES.has(kw.toLowerCase()); }
+function isLikelyFramework(kw: string): boolean { return FRAMEWORKS.has(kw.toLowerCase()); }
+function isLikelyDatabase(kw: string): boolean { return DATABASES.has(kw.toLowerCase()); }
+function isLikelyTool(kw: string): boolean { return TOOLS.has(kw.toLowerCase()); }

@@ -13,50 +13,17 @@ import {
 } from "@/components/ui/card";
 import { ResumeForm } from "@/components/builder/resume-form";
 import { ResumePreview } from "@/components/builder/resume-preview";
-import type { ResumeBuilderInput, GeneratedResume } from "@/types";
+import type { ResumeBuilderInput } from "@/types";
 
 export default function BuilderPage() {
-  const [generatedResume, setGeneratedResume] =
-    useState<GeneratedResume | null>(null);
-  const [latexCode, setLatexCode] = useState<string | null>(null);
   const [latexPdfBase64, setLatexPdfBase64] = useState<string | null>(null);
   const [atsKeywords, setAtsKeywords] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isGeneratingLatex, setIsGeneratingLatex] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleGenerate = async (input: ResumeBuilderInput) => {
     setIsGenerating(true);
     setError(null);
-
-    try {
-      const response = await fetch("/api/generate-resume", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || "Failed to generate resume.");
-      }
-
-      setGeneratedResume(result.data);
-    } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "Failed to generate resume."
-      );
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleGenerateLatex = async (input: ResumeBuilderInput) => {
-    setIsGeneratingLatex(true);
-    setError(null);
-    setLatexCode(null);
     setLatexPdfBase64(null);
     setAtsKeywords([]);
 
@@ -70,38 +37,21 @@ export default function BuilderPage() {
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || "Failed to generate LaTeX resume.");
+        throw new Error(result.error || "Failed to generate resume.");
       }
 
-      setLatexCode(result.data.latex);
       setLatexPdfBase64(result.data.pdf || null);
       setAtsKeywords(result.data.atsKeywords || []);
     } catch (err: unknown) {
       setError(
-        err instanceof Error ? err.message : "Failed to generate LaTeX resume."
+        err instanceof Error ? err.message : "Failed to generate resume."
       );
     } finally {
-      setIsGeneratingLatex(false);
+      setIsGenerating(false);
     }
   };
 
-  const handleExportLatex = useCallback(() => {
-    if (!latexCode) return;
-    const blob = new Blob([latexCode], { type: "application/x-tex" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "tailored-resume.tex";
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [latexCode]);
-
-  const handleCopyLatex = useCallback(() => {
-    if (!latexCode) return;
-    navigator.clipboard.writeText(latexCode);
-  }, [latexCode]);
-
-  const handleDownloadLatexPDF = useCallback(() => {
+  const handleDownloadPDF = useCallback(() => {
     if (!latexPdfBase64) return;
     const byteCharacters = atob(latexPdfBase64);
     const byteNumbers = new Array(byteCharacters.length);
@@ -118,115 +68,7 @@ export default function BuilderPage() {
     URL.revokeObjectURL(url);
   }, [latexPdfBase64]);
 
-  const handleExportPDF = useCallback(async () => {
-    if (!generatedResume) return;
-    setIsExporting(true);
 
-    try {
-      const { jsPDF } = await import("jspdf");
-      const doc = new jsPDF();
-
-      const margins = { top: 20, left: 20, right: 20 };
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const maxWidth = pageWidth - margins.left - margins.right;
-      let y = margins.top;
-
-      const addText = (text: string, fontSize: number, bold = false) => {
-        doc.setFontSize(fontSize);
-        if (bold) doc.setFont("helvetica", "bold");
-        else doc.setFont("helvetica", "normal");
-
-        const lines = doc.splitTextToSize(text, maxWidth);
-        for (const line of lines) {
-          if (y > 270) {
-            doc.addPage();
-            y = margins.top;
-          }
-          doc.text(line, margins.left, y);
-          y += fontSize * 0.5;
-        }
-        y += 4;
-      };
-
-      const sections = [
-        { text: generatedResume.sections.header, size: 14, bold: true },
-        { text: generatedResume.sections.summary, size: 10, bold: false },
-        { text: generatedResume.sections.skills, size: 10, bold: false },
-        { text: generatedResume.sections.experience, size: 10, bold: false },
-        { text: generatedResume.sections.education, size: 10, bold: false },
-        { text: generatedResume.sections.projects, size: 10, bold: false },
-        { text: generatedResume.sections.courses, size: 10, bold: false },
-        { text: generatedResume.sections.certifications, size: 10, bold: false },
-      ];
-
-      for (const section of sections) {
-        if (section.text && section.text.trim()) {
-          addText(section.text, section.size, section.bold);
-        }
-      }
-
-      doc.save("tailored-resume.pdf");
-    } catch (err) {
-      console.error("PDF export failed:", err);
-    } finally {
-      setIsExporting(false);
-    }
-  }, [generatedResume]);
-
-  const handleExportDOCX = useCallback(async () => {
-    if (!generatedResume) return;
-    setIsExporting(true);
-
-    try {
-      const { Document, Packer, Paragraph, TextRun, HeadingLevel } =
-        await import("docx");
-      const { saveAs } = await import("file-saver");
-
-      const children: InstanceType<typeof Paragraph>[] = [];
-
-      const addSection = (text: string, heading?: boolean) => {
-        if (!text || !text.trim()) return;
-        const lines = text.split("\n");
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          children.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: line,
-                  bold: heading,
-                  size: heading ? 28 : 22,
-                }),
-              ],
-              heading: heading ? HeadingLevel.HEADING_1 : undefined,
-              spacing: { after: 100 },
-            })
-          );
-        }
-        children.push(new Paragraph({ text: "" }));
-      };
-
-      addSection(generatedResume.sections.header, true);
-      addSection(generatedResume.sections.summary);
-      addSection(generatedResume.sections.skills);
-      addSection(generatedResume.sections.experience);
-      addSection(generatedResume.sections.education);
-      addSection(generatedResume.sections.projects);
-      addSection(generatedResume.sections.courses);
-      addSection(generatedResume.sections.certifications);
-
-      const doc = new Document({
-        sections: [{ children }],
-      });
-
-      const blob = await Packer.toBlob(doc);
-      saveAs(blob, "tailored-resume.docx");
-    } catch (err) {
-      console.error("DOCX export failed:", err);
-    } finally {
-      setIsExporting(false);
-    }
-  }, [generatedResume]);
 
   return (
     <>
@@ -274,9 +116,7 @@ export default function BuilderPage() {
                 <CardContent>
                   <ResumeForm
                     onGenerate={handleGenerate}
-                    onGenerateLatex={handleGenerateLatex}
                     isGenerating={isGenerating}
-                    isGeneratingLatex={isGeneratingLatex}
                   />
                 </CardContent>
               </Card>
@@ -297,16 +137,9 @@ export default function BuilderPage() {
                 </CardHeader>
                 <CardContent>
                   <ResumePreview
-                    resume={generatedResume}
-                    latexCode={latexCode}
                     latexPdfBase64={latexPdfBase64}
                     atsKeywords={atsKeywords}
-                    onExportPDF={handleExportPDF}
-                    onExportDOCX={handleExportDOCX}
-                    onExportLatex={handleExportLatex}
-                    onCopyLatex={handleCopyLatex}
-                    onDownloadLatexPDF={handleDownloadLatexPDF}
-                    isExporting={isExporting}
+                    onDownloadPDF={handleDownloadPDF}
                   />
                 </CardContent>
               </Card>

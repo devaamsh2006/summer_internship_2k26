@@ -2,6 +2,8 @@
 // Converts structured resume data into LaTeX code using the resume document class.
 // Produces an ATS-friendly, professionally formatted LaTeX resume.
 
+import fs from "fs";
+import path from "path";
 import type { LaTeXResumeData } from "@/types";
 
 /**
@@ -255,6 +257,10 @@ export function generateLaTeX(data: LaTeXResumeData): string {
  */
 export async function compileLaTeXToPDF(latexCode: string): Promise<Buffer | null> {
   try {
+    // Read the resume.cls file to bundle with the compilation request
+    const clsPath = path.join(process.cwd(), "resume_code", "resume.cls");
+    const clsContent = fs.readFileSync(clsPath, "utf-8");
+
     // Use latex.ytotech.com API for server-side compilation
     const response = await fetch("https://latex.ytotech.com/builds/sync", {
       method: "POST",
@@ -265,6 +271,10 @@ export async function compileLaTeXToPDF(latexCode: string): Promise<Buffer | nul
           {
             main: true,
             content: latexCode,
+          },
+          {
+            path: "resume.cls",
+            content: clsContent,
           },
         ],
       }),
