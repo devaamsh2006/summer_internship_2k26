@@ -403,10 +403,10 @@ CRITICAL RULES — NEVER VIOLATE THESE:
 4. The candidate's NAME, EMAIL, PHONE, GITHUB, LINKEDIN must be used exactly as provided.
 
 YOUR JOB IS TO:
-- Take the candidate's raw input and REWRITE it with professional phrasing, strong action verbs, and ATS-friendly language.
+- Take the candidate's raw input and REWRITE it with professional phrasing, strong action verbs, and ATS-friendly language. NEVER return the user's original text as-is.
 - Reorganize sections so the most JD-relevant content appears first.
 - Naturally weave ATS keywords into project descriptions, experience bullets, and skill listings — but ONLY if the candidate's actual background supports it.
-- For each project: write a clear one-line summary of what was built and WHY it matters, then list the technologies used.
+- For each project: write a concise one-line "description" summary, then generate 3-5 ENHANCED bullet points in a "bullets" array. Each bullet must be a professionally rewritten, expanded version of the candidate's input — describing the technical approach, architecture, and engineering patterns used. The bullets must NOT be copies of the user's text.
 - For each experience entry: rewrite bullets using action verbs (Engineered, Architected, Implemented, Developed, Optimized, Deployed, Automated, Integrated) to emphasize technical impact.
 - For skills: group into logical categories (Languages, Frameworks, Databases, Tools, etc.) with JD-relevant skills listed first in each category.
 
@@ -415,6 +415,19 @@ KEYWORD INJECTION STRATEGY:
 - For IMPORTANT keywords: include them where the candidate's experience naturally aligns.
 - Do NOT stuff keywords artificially. Every keyword must fit naturally in context.
 - If the candidate doesn't have experience with a keyword, DO NOT add it.
+- NEVER place security/auth keywords (like Authentication, Authorization, OAuth, JWT, RBAC) into soft skills. These are TECHNICAL concepts and belong in technical skills or should be woven into project/experience descriptions.
+- NEVER place methodology keywords (like Agile, Scrum, CI/CD, Microservices, TDD) into soft skills. Place them in a methodologies or tools category.
+
+PROJECT DESCRIPTION ENHANCEMENT (THIS IS CRITICAL — DO NOT JUST COPY THE USER'S TEXT):
+- You MUST rewrite and ENHANCE every project description. NEVER copy the candidate's text verbatim.
+- For each project, generate 3-5 detailed bullet points in the "bullets" array that expand on the original description.
+- Each bullet point must start with a strong action verb (Engineered, Architected, Implemented, Developed, Optimized, Deployed, Automated, Integrated, Designed, Built, Configured, Streamlined).
+- Transform vague descriptions into specific technical contributions: describe WHAT was built, HOW it was architected, WHAT patterns/technologies were used, and WHAT engineering challenges were addressed.
+- Naturally weave ATS-relevant keywords into the bullets by describing how those technologies were actually applied in the project.
+- If the candidate wrote "built a chat app using React and Node", you should expand this into multiple bullets describing: the real-time architecture, state management approach, API design, database schema decisions, deployment strategy, etc.
+- The "description" field should be a concise one-line summary. The real enhanced content goes in "bullets".
+- Do NOT invent metrics, performance numbers, or specific quantitative results. Instead, describe the technical approach and engineering impact qualitatively.
+- Focus on WHAT was built, HOW it was architected, and WHAT engineering challenges were solved.
 ${keywordSection}
 
 OUTPUT FORMAT — Return a valid JSON object with this EXACT structure:
@@ -433,7 +446,13 @@ OUTPUT FORMAT — Return a valid JSON object with this EXACT structure:
   "projects": [
     {
       "name": "Candidate's actual project name",
-      "description": "Rewritten professional description of what was built, engineering approach, and impact",
+      "description": "A concise one-line summary of what the project does and its purpose",
+      "bullets": [
+        "Enhanced bullet 1: Describe a key technical contribution using strong action verbs and ATS keywords",
+        "Enhanced bullet 2: Explain the architecture, design decisions, or engineering approach used",
+        "Enhanced bullet 3: Highlight a specific technical challenge solved or optimization made",
+        "Enhanced bullet 4: Describe integration patterns, API design, or system components built"
+      ],
       "technologies": "Actual tech stack used",
       "githubUrl": "Actual GitHub URL if provided"
     }
@@ -522,10 +541,13 @@ function buildLaTeXPrompt(input: ResumeBuilderInput, keywords: string[], rankedT
   parts.push(`\n=== INSTRUCTIONS ===`);
   parts.push(`1. Generate the resume JSON using ONLY the candidate data above.`);
   parts.push(`2. Every project and experience entry MUST be included — do not skip any.`);
-  parts.push(`3. Naturally incorporate the CRITICAL and IMPORTANT ATS keywords into descriptions and bullets.`);
+  parts.push(`3. Naturally incorporate the CRITICAL and IMPORTANT ATS keywords into project bullets and experience bullets by describing HOW those technologies were used.`);
   parts.push(`4. Reorder skills and projects so JD-relevant ones appear first.`);
-  parts.push(`5. Use strong action verbs and quantify impact where the candidate's data supports it.`);
+  parts.push(`5. Use strong action verbs. Describe technical approaches and engineering impact qualitatively — do NOT invent specific numbers or metrics.`);
   parts.push(`6. Do NOT copy content from any template — generate unique content from this candidate's data.`);
+  parts.push(`7. NEVER place technical keywords (Authentication, Authorization, OAuth, JWT, CI/CD, Agile, etc.) in soft skills. These belong in technical skill categories or project descriptions.`);
+  parts.push(`8. CRITICAL: For each project, generate 3-5 ENHANCED bullet points in a "bullets" array. Do NOT just copy the user's project description. REWRITE and EXPAND each project with professional, detailed technical descriptions using strong action verbs. The bullets should describe architecture, engineering approach, technical challenges solved, and how JD-relevant technologies were applied.`);
+  parts.push(`9. The "description" field for projects should be a concise one-line summary. The detailed enhanced content goes in "bullets".`);
 
   return parts.join("\n");
 }
@@ -552,9 +574,10 @@ Your task is to REVIEW and IMPROVE it, then return the corrected version.
 CHECK FOR:
 1. COMPLETENESS: Every section must have content if the original candidate data had it. Missing sections = FAIL.
 2. KEYWORD COVERAGE: The resume must naturally contain these ATS keywords where relevant: ${keywords.join(", ")}
-3. DESCRIPTION QUALITY: Each project must have a meaningful description (not just the name). Each experience must have detailed bullets.
-4. SKILL ORGANIZATION: Skills must be grouped logically with JD-relevant categories first.
-5. NO FABRICATION: Do not add skills, projects, or experience the candidate didn't provide.
+3. PROJECT BULLET QUALITY: Each project MUST have 3-5 detailed, enhanced bullet points in its "bullets" array. If any project has empty or missing bullets, GENERATE them. Bullets must NOT be copies of the user's original text — they must be professionally enhanced with action verbs and ATS-relevant terminology.
+4. DESCRIPTION QUALITY: Each experience must have detailed bullets.
+5. SKILL ORGANIZATION: Skills must be grouped logically with JD-relevant categories first.
+6. NO FABRICATION: Do not add skills, projects, or experience the candidate didn't provide. But DO enhance and expand the DESCRIPTIONS of existing items.
 
 If the resume is already complete and well-optimized, return it as-is.
 If improvements are needed, make them and return the corrected JSON.
@@ -587,6 +610,22 @@ function mergeResumeData(
   original: LaTeXResumeData,
   validated: LaTeXResumeData
 ): LaTeXResumeData {
+  // For projects, prefer the version with more bullet content
+  let mergedProjects = validated.projects.length > 0 ? validated.projects : original.projects;
+  if (validated.projects.length > 0 && original.projects.length > 0) {
+    mergedProjects = validated.projects.map((vp, i) => {
+      const op = original.projects[i];
+      if (!op) return vp;
+      // Prefer whichever has more bullets (enhanced content)
+      const vBullets = vp.bullets && vp.bullets.length > 0 ? vp.bullets : [];
+      const oBullets = op.bullets && op.bullets.length > 0 ? op.bullets : [];
+      return {
+        ...vp,
+        bullets: vBullets.length >= oBullets.length ? vBullets : oBullets,
+      };
+    });
+  }
+
   return {
     name: validated.name || original.name,
     location: validated.location || original.location,
@@ -595,7 +634,7 @@ function mergeResumeData(
     links: validated.links.length > 0 ? validated.links : original.links,
     education: validated.education.length > 0 ? validated.education : original.education,
     skills: validated.skills.length > 0 ? validated.skills : original.skills,
-    projects: validated.projects.length > 0 ? validated.projects : original.projects,
+    projects: mergedProjects,
     experience: validated.experience.length > 0 ? validated.experience : original.experience,
     courses: validated.courses.length > 0 ? validated.courses : original.courses,
     achievements: validated.achievements.length > 0 ? validated.achievements : original.achievements,
@@ -628,7 +667,13 @@ function parseLaTeXResumeData(
       links: Array.isArray(parsed.links) ? parsed.links : buildFallbackLinks(input),
       education: Array.isArray(parsed.education) ? parsed.education : [],
       skills: Array.isArray(parsed.skills) ? parsed.skills : [],
-      projects: Array.isArray(parsed.projects) ? parsed.projects : [],
+      projects: Array.isArray(parsed.projects) ? parsed.projects.map((p: Record<string, unknown>) => ({
+        name: p.name || "",
+        description: p.description || "",
+        bullets: Array.isArray(p.bullets) ? p.bullets : [],
+        technologies: p.technologies || "",
+        githubUrl: p.githubUrl || "",
+      })) : [],
       experience: Array.isArray(parsed.experience) ? parsed.experience : [],
       courses: Array.isArray(parsed.courses) ? parsed.courses : [],
       achievements: Array.isArray(parsed.achievements) ? parsed.achievements : [],
@@ -678,7 +723,7 @@ function injectMissingKeywords(
   // Serialize the entire resume to lowercase text for keyword presence checking
   const resumeText = [
     ...data.skills.map((s) => `${s.category} ${s.items}`),
-    ...data.projects.map((p) => `${p.name} ${p.description} ${p.technologies}`),
+    ...data.projects.map((p) => `${p.name} ${p.description} ${p.technologies} ${(p.bullets || []).join(" ")}`),
     ...data.experience.map((e) => `${e.title} ${e.bullets.join(" ")}`),
     ...data.courses,
     ...data.achievements,
@@ -752,8 +797,34 @@ function injectMissingKeywords(
   const result: LaTeXResumeData = {
     ...data,
     skills: data.skills.map((s) => ({ ...s })),
-    projects: data.projects.map((p) => ({ ...p })),
+    projects: data.projects.map((p) => ({ ...p, bullets: [...(p.bullets || [])] })),
     experience: data.experience.map((e) => ({ ...e, bullets: [...e.bullets] })),
+  };
+
+  // Category pattern mapping: keyword type → regex patterns to match category names
+  const CATEGORY_PATTERNS: Record<string, RegExp> = {
+    language: /language|programming/i,
+    framework: /web|framework|frontend|backend|librar|technolog/i,
+    database: /database|data(?!.*science)|storage/i,
+    tool: /tool|devops|cloud|build|infra|developer/i,
+    security: /security|auth|web.*technolog|tool|developer/i,
+    concept: /concept|methodolog|practice|architect|developer/i,
+    testing: /test|quality|developer.*tool|tool/i,
+    cloud_service: /cloud|aws|azure|gcp|devops|infra|tool/i,
+    data_science: /data.*science|ml|ai|machine|analytic|data/i,
+  };
+
+  // New category names to create if no existing category matches
+  const NEW_CATEGORY_NAMES: Record<string, string> = {
+    language: "Programming Languages",
+    framework: "Frameworks & Libraries",
+    database: "Databases",
+    tool: "Developer Tools",
+    security: "Security & Authentication",
+    concept: "Methodologies & Concepts",
+    testing: "Testing",
+    cloud_service: "Cloud Services",
+    data_science: "Data Science & ML",
   };
 
   // Inject each keyword into the best matching skill category
@@ -761,6 +832,7 @@ function injectMissingKeywords(
   for (const keyword of missingKeywords) {
     const kwLower = keyword.toLowerCase();
     let injected = false;
+    const kwType = classifyKeyword(keyword);
 
     // Try to find the best skill category for this keyword
     for (const skillCat of result.skills) {
@@ -773,14 +845,9 @@ function injectMissingKeywords(
         break;
       }
 
-      // Match keyword to category
-      const belongsHere =
-        (isLikelyLanguage(keyword) && /language|programming/i.test(catLower)) ||
-        (isLikelyFramework(keyword) && /web|framework|frontend|backend|librar/i.test(catLower)) ||
-        (isLikelyDatabase(keyword) && /database|data|storage/i.test(catLower)) ||
-        (isLikelyTool(keyword) && /tool|devops|cloud|build|infra/i.test(catLower));
-
-      if (belongsHere) {
+      // Match keyword to category using its classified type
+      const pattern = kwType !== "unknown" ? CATEGORY_PATTERNS[kwType] : null;
+      if (pattern && pattern.test(catLower)) {
         skillCat.items += `, ${keyword}`;
         injected = true;
         break;
@@ -792,54 +859,86 @@ function injectMissingKeywords(
     }
   }
 
-  // For remaining keywords that didn't match any category,
-  // add to the most relevant existing category or create one
+  // For remaining keywords, group by type and add to matching categories or create new ones
   if (remainingKeywords.length > 0) {
-    // Group remaining by type
-    const langKws = remainingKeywords.filter(isLikelyLanguage);
-    const fwKws = remainingKeywords.filter(isLikelyFramework);
-    const dbKws = remainingKeywords.filter(isLikelyDatabase);
-    const toolKws = remainingKeywords.filter(isLikelyTool);
-    const otherKws = remainingKeywords.filter(
-      (k) => !isLikelyLanguage(k) && !isLikelyFramework(k) && !isLikelyDatabase(k) && !isLikelyTool(k)
-    );
-
-    // Helper: add keywords to the first matching category or the last one
-    const addToSkills = (kws: string[]) => {
-      if (kws.length === 0) return;
-      if (result.skills.length > 0) {
-        const target = result.skills[result.skills.length - 1];
-        for (const kw of kws) {
-          if (!target.items.toLowerCase().includes(kw.toLowerCase())) {
-            target.items += `, ${kw}`;
-          }
-        }
-      } else {
-        result.skills.push({ category: "Technical Skills", items: kws.join(", ") });
-      }
-    };
-
-    // Try adding to relevant existing categories, or fall back to last one
-    for (const [kws, pattern] of [
-      [langKws, /language|programming/i],
-      [fwKws, /web|framework|frontend|backend/i],
-      [dbKws, /database|data/i],
-      [toolKws, /tool|devops|cloud/i],
-    ] as [string[], RegExp][]) {
-      if (kws.length === 0) continue;
-      const cat = result.skills.find((s) => pattern.test(s.category));
-      if (cat) {
-        for (const kw of kws) {
-          if (!cat.items.toLowerCase().includes(kw.toLowerCase())) {
-            cat.items += `, ${kw}`;
-          }
-        }
-      } else {
-        addToSkills(kws);
-      }
+    // Group by classification
+    const grouped: Record<string, string[]> = {};
+    for (const kw of remainingKeywords) {
+      const kwType = classifyKeyword(kw);
+      if (!grouped[kwType]) grouped[kwType] = [];
+      grouped[kwType].push(kw);
     }
 
-    addToSkills(otherKws);
+    // For each group, try to find an existing category or create one
+    for (const [kwType, kws] of Object.entries(grouped)) {
+      if (kws.length === 0) continue;
+
+      const pattern = CATEGORY_PATTERNS[kwType];
+      const existingCat = pattern
+        ? result.skills.find((s) => pattern.test(s.category))
+        : null;
+
+      if (existingCat) {
+        for (const kw of kws) {
+          if (!existingCat.items.toLowerCase().includes(kw.toLowerCase())) {
+            existingCat.items += `, ${kw}`;
+          }
+        }
+      } else if (kwType !== "unknown") {
+        // Create a new category for this type
+        const newCatName = NEW_CATEGORY_NAMES[kwType] || "Technical Skills";
+        // Check if we just created this category in a previous iteration
+        const justCreated = result.skills.find(
+          (s) => s.category === newCatName
+        );
+        if (justCreated) {
+          for (const kw of kws) {
+            if (!justCreated.items.toLowerCase().includes(kw.toLowerCase())) {
+              justCreated.items += `, ${kw}`;
+            }
+          }
+        } else {
+          result.skills.push({ category: newCatName, items: kws.join(", ") });
+        }
+      } else {
+        // Unknown type: try to find the most relevant category by checking
+        // if any existing category's items contain related keywords
+        let bestCat: typeof result.skills[0] | null = null;
+        for (const skillCat of result.skills) {
+          const catLower = skillCat.category.toLowerCase();
+          // Skip soft skills — never inject technical keywords here
+          if (/soft\s*skill|interpersonal|communication/i.test(catLower)) continue;
+          // Prefer "Technical Skills" or "Developer Tools" as catch-all
+          if (/technical|developer|tool/i.test(catLower)) {
+            bestCat = skillCat;
+            break;
+          }
+        }
+        if (bestCat) {
+          for (const kw of kws) {
+            if (!bestCat.items.toLowerCase().includes(kw.toLowerCase())) {
+              bestCat.items += `, ${kw}`;
+            }
+          }
+        } else if (result.skills.length > 0) {
+          // Last resort: find first non-soft-skills category
+          const safeCat = result.skills.find(
+            (s) => !/soft\s*skill|interpersonal|communication/i.test(s.category)
+          );
+          if (safeCat) {
+            for (const kw of kws) {
+              if (!safeCat.items.toLowerCase().includes(kw.toLowerCase())) {
+                safeCat.items += `, ${kw}`;
+              }
+            }
+          } else {
+            result.skills.push({ category: "Technical Skills", items: kws.join(", ") });
+          }
+        } else {
+          result.skills.push({ category: "Technical Skills", items: kws.join(", ") });
+        }
+      }
+    }
   }
 
   return result;
@@ -847,11 +946,37 @@ function injectMissingKeywords(
 
 // Keyword classification helpers
 const LANGUAGES = new Set(["javascript", "typescript", "python", "java", "c++", "c", "c#", "go", "rust", "ruby", "php", "swift", "kotlin", "scala", "r", "matlab", "perl", "dart", "lua", "sql", "html", "css", "shell", "bash"]);
-const FRAMEWORKS = new Set(["react", "angular", "vue.js", "vue", "next.js", "nextjs", "nuxt.js", "svelte", "express", "django", "flask", "fastapi", "spring boot", "rails", "laravel", "node.js", "nodejs", "nestjs", ".net", "asp.net", "tailwind css", "bootstrap", "material ui", "react native", "flutter"]);
-const DATABASES = new Set(["postgresql", "mysql", "mongodb", "redis", "sqlite", "elasticsearch", "dynamodb", "cassandra", "firebase", "supabase", "neo4j", "mariadb", "sql server"]);
-const TOOLS = new Set(["docker", "kubernetes", "jenkins", "github actions", "terraform", "ansible", "nginx", "git", "github", "aws", "azure", "google cloud", "gcp", "heroku", "vercel", "webpack", "vite", "ci/cd", "jira", "postman", "figma"]);
+const FRAMEWORKS = new Set(["react", "angular", "vue.js", "vue", "next.js", "nextjs", "nuxt.js", "svelte", "express", "django", "flask", "fastapi", "spring boot", "rails", "laravel", "node.js", "nodejs", "nestjs", ".net", "asp.net", "tailwind css", "bootstrap", "material ui", "react native", "flutter", "redux", "mobx", "zustand", "graphql", "rest api", "trpc", "prisma", "sequelize", "typeorm", "mongoose", "hibernate", "sqlalchemy", "drizzle", "sass", "less", "styled-components", "styled components"]);
+const DATABASES = new Set(["postgresql", "mysql", "mongodb", "redis", "sqlite", "elasticsearch", "dynamodb", "cassandra", "firebase", "supabase", "neo4j", "mariadb", "sql server", "couchdb", "memcached"]);
+const TOOLS = new Set(["docker", "kubernetes", "jenkins", "github actions", "gitlab ci", "circleci", "terraform", "ansible", "nginx", "git", "github", "gitlab", "bitbucket", "aws", "azure", "google cloud", "gcp", "heroku", "vercel", "netlify", "webpack", "vite", "ci/cd", "jira", "postman", "figma", "helm", "argocd", "prometheus", "grafana", "datadog", "sentry", "splunk", "npm", "yarn", "pnpm", "maven", "gradle", "babel", "esbuild", "rollup", "cloudformation", "aws cdk"]);
+const SECURITY = new Set(["authentication", "authorization", "oauth", "oauth2", "jwt", "rbac", "role based access", "owasp", "ssl", "tls", "ssl/tls", "encryption", "openapi", "swagger"]);
+const CONCEPTS = new Set(["microservices", "system design", "design patterns", "agile", "scrum", "kanban", "tdd", "test driven development", "devops", "machine learning", "deep learning", "nlp", "natural language processing", "computer vision", "cdn", "content delivery network"]);
+const TESTING = new Set(["jest", "mocha", "cypress", "selenium", "playwright", "pytest", "junit", "testing library", "react testing library", "vitest", "storybook"]);
+const CLOUD_SERVICES = new Set(["aws lambda", "aws s3", "aws ec2", "aws ecs", "aws eks", "aws rds", "aws sqs", "aws sns", "rabbitmq", "kafka", "apache kafka", "digitalocean", "cloudflare"]);
+const DATA_SCIENCE = new Set(["tensorflow", "pytorch", "scikit-learn", "pandas", "numpy", "keras", "jupyter", "apache spark", "hadoop", "tableau", "power bi", "opencv", "langchain", "hugging face"]);
 
 function isLikelyLanguage(kw: string): boolean { return LANGUAGES.has(kw.toLowerCase()); }
 function isLikelyFramework(kw: string): boolean { return FRAMEWORKS.has(kw.toLowerCase()); }
 function isLikelyDatabase(kw: string): boolean { return DATABASES.has(kw.toLowerCase()); }
 function isLikelyTool(kw: string): boolean { return TOOLS.has(kw.toLowerCase()); }
+function isLikelySecurity(kw: string): boolean { return SECURITY.has(kw.toLowerCase()); }
+function isLikelyConcept(kw: string): boolean { return CONCEPTS.has(kw.toLowerCase()); }
+function isLikelyTesting(kw: string): boolean { return TESTING.has(kw.toLowerCase()); }
+function isLikelyCloudService(kw: string): boolean { return CLOUD_SERVICES.has(kw.toLowerCase()); }
+function isLikelyDataScience(kw: string): boolean { return DATA_SCIENCE.has(kw.toLowerCase()); }
+
+/**
+ * Classify a keyword into a skill category type.
+ */
+function classifyKeyword(kw: string): string {
+  if (isLikelyLanguage(kw)) return "language";
+  if (isLikelyFramework(kw)) return "framework";
+  if (isLikelyDatabase(kw)) return "database";
+  if (isLikelyTool(kw)) return "tool";
+  if (isLikelySecurity(kw)) return "security";
+  if (isLikelyConcept(kw)) return "concept";
+  if (isLikelyTesting(kw)) return "testing";
+  if (isLikelyCloudService(kw)) return "cloud_service";
+  if (isLikelyDataScience(kw)) return "data_science";
+  return "unknown";
+}

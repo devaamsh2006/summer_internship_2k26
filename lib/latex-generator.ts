@@ -155,6 +155,15 @@ function generateProjects(projects: LaTeXResumeData["projects"]): string {
     if (project.technologies) {
       lines.push(`\\textbf{Technologies:} ${escapeLatex(project.technologies)}`);
     }
+
+    // Render enhanced bullet points if available
+    if (project.bullets && project.bullets.length > 0) {
+      lines.push("\\begin{itemize}[leftmargin=1.5em]");
+      for (const bullet of project.bullets) {
+        lines.push(`\\item ${escapeLatex(bullet)}`);
+      }
+      lines.push("\\end{itemize}");
+    }
     lines.push("");
   }
 

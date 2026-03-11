@@ -159,6 +159,7 @@ export interface LaTeXSkillCategory {
 export interface LaTeXProjectEntry {
   name: string;
   description: string;
+  bullets: string[];
   technologies: string;
   githubUrl?: string;
 }
