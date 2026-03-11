@@ -22,6 +22,7 @@ import { SectionScoresDisplay } from "@/components/dashboard/section-scores";
 import { MissingSkillsDisplay } from "@/components/dashboard/missing-skills";
 import { ImprovementsDisplay } from "@/components/dashboard/improvements";
 import { ATSScore } from "@/components/dashboard/ats-score";
+import { TailoredResume } from "@/components/dashboard/tailored-resume";
 import { Sparkles, ArrowLeft, Loader2 } from "lucide-react";
 import type {
   ResumeData,
@@ -164,12 +165,13 @@ export default function DashboardPage() {
 
           {/* Tabbed content */}
           <Tabs defaultValue="overview" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-5 h-11">
+            <TabsList className="grid w-full grid-cols-6 h-11">
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="skills">Skills</TabsTrigger>
               <TabsTrigger value="keywords">Keywords</TabsTrigger>
               <TabsTrigger value="ats">ATS</TabsTrigger>
               <TabsTrigger value="improvements">Improvements</TabsTrigger>
+              <TabsTrigger value="tailored">Tailored Resume</TabsTrigger>
             </TabsList>
 
             {/* Overview Tab */}
@@ -343,6 +345,29 @@ export default function DashboardPage() {
                     <ImprovementsDisplay
                       improvements={improvements}
                       isLoading={isLoadingImprovements}
+                    />
+                  </CardContent>
+                </Card>
+              </motion.div>
+            </TabsContent>
+
+            {/* Tailored Resume Tab */}
+            <TabsContent value="tailored">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+              >
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      Generate Tailored Resume
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <TailoredResume
+                      resumeData={data.resumeData}
+                      jdData={data.jdData}
+                      originalAtsScore={data.atsAnalysis.score}
                     />
                   </CardContent>
                 </Card>
