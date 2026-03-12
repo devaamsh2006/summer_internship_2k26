@@ -162,7 +162,3 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 - **No fabricated outputs** — the LLM never invents skills, experiences, or metrics
 - **Sentence Transformers run locally** via @xenova/transformers (no external API needed for semantic matching)
 - **Greedy semantic matching** ensures each JD skill maps to at most one resume skill
-
-## License
-
-MIT
