@@ -1,0 +1,444 @@
+AI Resume Intelligence Platform - Presentation Notes
+Date: 2026-03-13
+
+============================================================
+1) WHAT HAPPENS WHEN A USER SUBMITS A RESUME (STEP BY STEP)
+============================================================
+
+A. Frontend flow (Upload page)
+1. User uploads resume (PDF/DOCX) and enters Job Description text.
+2. Frontend sends resume file to POST /api/parse-resume.
+3. If parsing succeeds, structured resume data is stored in state.
+4. On "Run AI Analysis", frontend sends JD text to POST /api/analyze-jd.
+5. If JD analysis succeeds, frontend sends both resumeData + jdData to POST /api/match-score.
+6. Final response contains:
+   - matchResult
+   - missingSkills
+   - atsAnalysis
+   - keywordAnalysis
+   - strengthScore
+7. Frontend stores this in sessionStorage under key: analysisResult.
+8. User is redirected to /dashboard where all analytics are displayed.
+
+B. Backend pipeline details
+
+Step 1: Resume parsing (POST /api/parse-resume)
+- Validates file exists.
+- Max size check: 10MB.
+- Allowed extensions: pdf, docx, doc.
+- Extracts text:
+  - PDF via pdf-parse
+  - DOCX via mammoth
+- Cleans text (normalize newlines/spaces).
+- Splits resume into sections using deterministic header rules:
+  contact, summary, skills, experience, projects, education, certifications.
+- Extracts skills using taxonomy/rule based extractor.
+- Returns ResumeData:
+  rawText, sections, extractedSkills, fileName.
+
+Step 2: Job description analysis (POST /api/analyze-jd)
+- Validates JD exists and minimum length >= 20 chars.
+- Extracts requiredSkills from JD.
+- Splits into technologies and tools.
+- Extracts experience requirement lines (years, seniority, degree patterns).
+- Returns JobDescriptionData:
+  rawText, requiredSkills, technologies, tools, experienceRequirements.
+
+Step 3: Match + scoring (POST /api/match-score)
+- Calls computeMatchResult (semantic + deterministic matching).
+- Calls detectMissingSkills.
+- Calls analyzeATSCompatibility.
+- Calls analyzeKeywords.
+- Calls computeStrengthScore.
+- Returns one combined analysis payload.
+
+============================================================
+2) HOW ATS SCORE IS CALCULATED (EXACT LOGIC)
+============================================================
+
+ATS score is computed in lib/ats-analyzer.ts and is deterministic (no LLM).
+
+Final ATS score formula:
+ATS = round(
+  0.25 * sectionScore
++ 0.30 * keywordPresence
++ 0.15 * keywordDensity
++ 0.15 * readabilityScore
++ 0.15 * formattingScore
+)
+
+Each component:
+
+1. sectionScore (0-100)
+- Required sections: contact, summary, skills, experience, education.
+- Optional sections: projects, certifications (bonus).
+- Section considered present if content length > 10 chars.
+- Required weight unit = 1 each.
+- Optional weight unit = 0.3 each.
+- sectionScore = (earned / total) * 100.
+
+2. keywordPresence (0-100)
+- Compare JD requiredSkills against resume raw text (case-insensitive string includes).
+- keywordPresence = round((matchedRequiredSkills / totalRequiredSkills) * 100).
+
+3. keywordDensity (bucket score)
+- Count total words in resume.
+- Count total occurrences of JD required skills in resume.
+- density% = (keywordOccurrences / totalWords) * 100.
+- Scoring buckets:
+  - 2% to 5% -> 100 (ideal)
+  - 1% to <2% -> 70
+  - >5% to 8% -> 70
+  - >0% to <1% -> 40
+  - >8% -> 30
+  - 0% -> 0
+
+4. readabilityScore (0-100)
+- Uses Flesch Reading Ease approximation.
+- Sentence count, word count, syllable estimation.
+- Converts Flesch score to bands:
+  - 60-80 -> 100 (ideal for resume readability)
+  - 40-59 -> 80
+  - 80-100 -> 80
+  - 20-39 -> 50
+  - >100 -> 60
+  - otherwise -> 30
+
+5. formattingScore (starts at 100, penalties applied)
+- Penalty if too few bullet lines (<3): -15
+- Penalty by word count:
+  - <200: -25
+  - <300: -10
+  - >1500: -10
+  - >2000: -20
+- Too many long lines (>150 chars) and count >5: -10
+- ATS-unfriendly box/table unicode chars (>5): -20
+- Too many tabs (>10), indicates columns/tables: -15
+- Lower bounded at 0.
+
+Important point for viva:
+- ATS score here is a custom compatibility index, not an external ATS vendor score.
+
+============================================================
+2A) DASHBOARD METRICS: WHAT EACH SCORE MEANS
+============================================================
+
+In your dashboard, three different top-level scores are shown. They answer
+different questions:
+
+1) Overall Match Score
+- Source: matchResult.overallScore
+- Question it answers: "How well does this resume semantically match this JD?"
+- Built from two halves:
+  A) Section relevance (50%)
+  B) Skill semantic match (50%)
+
+Exact formula (from matching-engine):
+overallMatch = round(0.5 * sectionAvg + 0.5 * skillScore)
+
+Where:
+- sectionAvg =
+  0.35*skillsSection + 0.35*experienceSection + 0.15*projectsSection + 0.15*educationSection
+- skillScore = average semantic match quality against JD skills
+  (exact matches + partial matches using sentence-transformer cosine similarity)
+
+2) Strength Score
+- Source: strengthScore.overall
+- Question it answers: "How strong is this resume overall for this role from a quality + relevance view?"
+- It combines alignment + keyword quality + relevance of experience/projects.
+
+Exact formula (from scoring.ts):
+strengthScore = round(
+  0.35*skillAlignment
+  + 0.25*keywordCoverage
+  + 0.25*experienceRelevance
+  + 0.15*projectRelevance
+)
+
+Where:
+- skillAlignment comes from semanticSkillMatches
+- keywordCoverage comes from keywordAnalysis (matched vs missing, with overuse penalty)
+- experienceRelevance = sectionScores.experience
+- projectRelevance = sectionScores.projects
+
+3) ATS Compatibility Score
+- Source: atsAnalysis.score
+- Question it answers: "How ATS-friendly is resume structure/content for this JD?"
+- Deterministic ATS-style compatibility index.
+
+Exact formula (from ats-analyzer):
+atsCompatibility = round(
+  0.25*sectionCompletenessScore
+  + 0.30*keywordPresence
+  + 0.15*keywordDensity
+  + 0.15*readabilityScore
+  + 0.15*formattingScore
+)
+
+Quick way to explain to guide:
+- Overall Match = semantic fit with the JD.
+- Strength Score = resume quality + role relevance composite.
+- ATS Compatibility = machine-readability and ATS-friendly optimization.
+
+Why all three are needed:
+- A resume can semantically match JD but still be ATS-unfriendly.
+- A resume can be ATS-friendly but weak in real skill relevance.
+- Showing all 3 gives a balanced and explainable evaluation.
+
+============================================================
+3) WHY SENTENCE TRANSFORMERS ARE USED
+============================================================
+
+Used model path:
+- @xenova/transformers feature-extraction pipeline
+- Model: Xenova/all-MiniLM-L6-v2
+- Embedding size: 384
+- Similarity metric: cosine similarity
+
+Where used in your system:
+1. Section similarity:
+   compute similarity between resume sections and full JD text.
+2. Semantic skill matching:
+   identifies partial/semantic matches even if exact words differ.
+   Example: "JS" vs "JavaScript", "REST API" vs "RESTful services".
+3. Tailoring flow:
+   rank JD keywords by semantic importance against full JD embedding.
+
+Why this is better than keyword-only matching:
+- Captures meaning, not just exact text overlap.
+- Handles synonyms and paraphrases.
+- More robust against wording differences between candidate and JD.
+- Deterministic and cheaper than using LLM for every match operation.
+
+Architecture reason:
+- You combine deterministic rules + sentence embeddings.
+- LLM is used mainly for generation/tailoring text, not base scoring.
+- This gives explainability + repeatability + cost control.
+
+============================================================
+3A) HOW JD REQUIRED SKILLS ARE EXTRACTED (LLM OR NOT?)
+============================================================
+
+Short answer:
+- Required skills extraction is NOT done by LLM.
+- Required skills extraction is also NOT done by sentence transformers.
+- It is done by a deterministic rule-based skill extractor (taxonomy + regex/alias matching).
+
+Exact flow in your code:
+1. /api/analyze-jd receives raw JD text.
+2. analyzeJobDescription(jdText) is called.
+3. analyzeJobDescription calls extractSkills(jdText).
+4. extractSkills scans JD against SKILL_TAXONOMY in lib/skill-extractor.ts.
+5. For each canonical skill (for example JavaScript, React, AWS), it checks aliases
+   and boundary-safe regex patterns in JD text.
+6. Matched skills are deduplicated, normalized to canonical names, sorted, and returned.
+7. Those become jdData.requiredSkills.
+
+So what does each component do?
+- Rule-based extractor:
+  Finds explicit skill mentions in JD (deterministic, reproducible).
+- Sentence transformers:
+  Used AFTER extraction for semantic similarity and matching quality.
+  Example: deciding closeness between resume and JD skill phrases.
+- LLM:
+  Used mainly for resume tailoring/generation, not for requiredSkills extraction.
+
+Why this design is strong for viva discussion:
+- Deterministic extraction gives stable and explainable required skills.
+- Embeddings add semantic intelligence where exact match is too strict.
+- LLM is constrained to content generation, reducing scoring variance.
+
+One-line answer for your guide:
+"In my project, required JD skills are extracted by a deterministic taxonomy-based parser; sentence transformers are used later for semantic matching, and LLM is used only for resume generation/tailoring."
+
+============================================================
+3B) HOW RESUME SKILLS ARE EXTRACTED + HOW SIMILARITY IS FOUND
+============================================================
+
+Part 1: How skills are extracted from resume
+
+Short answer:
+- Resume skill extraction is deterministic (rule-based), not LLM.
+- Same extractor family is used for JD and resume text to keep comparison consistent.
+
+Exact resume extraction flow:
+1. User uploads PDF/DOCX.
+2. Text is extracted (pdf-parse or mammoth), cleaned, and sectioned.
+3. parseResumeFile(...) calls extractSkills(rawText).
+4. extractSkills checks text against SKILL_TAXONOMY aliases and regex patterns.
+5. All matches are converted to canonical names (normalization).
+6. Duplicates are removed and sorted.
+7. Final output is saved as resumeData.extractedSkills.
+
+Important point:
+- This means both lists (resume skills and JD skills) are standardized before matching.
+- Example: "react.js" and "react" map to canonical "React".
+
+Part 2: After extraction from both sides, how similarity is computed
+
+Input to matching stage:
+- resumeSkills = resumeData.extractedSkills
+- jdSkills = jdData.requiredSkills
+
+Step A: Exact matching first (deterministic)
+1. Normalize both skill lists to lowercase canonical forms.
+2. If normalized strings are equal, mark as exact match with similarity = 1.0.
+3. Remove exact-matched skills from further semantic comparison.
+
+Step B: Semantic matching for unmatched skills (Sentence Transformers)
+1. For each unmatched skill term, compute embedding vector using:
+  Xenova/all-MiniLM-L6-v2 (384 dimensions).
+2. Build pairwise similarities between unmatched resume skills and unmatched JD skills.
+3. Similarity metric is cosine similarity.
+
+Cosine formula used conceptually:
+similarity(a,b) = (a dot b) / (||a|| * ||b||)
+
+Where:
+- a = embedding of resume skill
+- b = embedding of JD skill
+- output range is approximately -1 to 1 (in practice here mostly 0 to 1)
+
+Step C: Greedy assignment with threshold
+1. All skill pairs are sorted by similarity descending.
+2. Greedy selection is applied so one JD skill maps to at most one resume skill.
+3. Pair is accepted as partial match only if similarity >= 0.65.
+4. Remaining JD skills are marked as matchType = none (missing/unsatisfied).
+
+Step D: Final semanticSkillMatches object
+Each entry has:
+- resumeSkill
+- jdSkill
+- similarity
+- matchType (exact | partial | none)
+
+Why this 2-stage design is good:
+- Exact matching preserves precision for obvious matches.
+- Embedding matching recovers semantically close terms.
+- Threshold + one-to-one greedy mapping reduces false positives.
+- Fully deterministic pipeline once embeddings are generated.
+
+Quick viva answer:
+"We first extract and normalize resume and JD skills deterministically from a taxonomy. Then we do exact string matches. For the remaining unmatched skills, we compute sentence-transformer embeddings and cosine similarity, accept partial matches above 0.65, and mark the rest as missing."
+
+============================================================
+3C) WHY THRESHOLD = 0.65 (WHY NOT LOWER OR HIGHER?)
+============================================================
+
+Short answer:
+- 0.65 is a balance point between false positives and false negatives
+  for semantic skill matching in this project.
+
+Why not lower (for example 0.50 or 0.55)?
+- Lower threshold increases recall but also increases false positives.
+- Unrelated or weakly related skills can start matching accidentally.
+- Example risk: "Java" matching too loosely with unrelated terms in noisy text.
+- Result: inflated match score, misleading ATS/match insights.
+
+Why not higher (for example 0.75 or 0.80)?
+- Higher threshold improves precision but hurts recall.
+- Many genuinely related skills get rejected as non-matches.
+- Example risk: "REST API" vs "RESTful services" may be dropped if threshold is too strict.
+- Result: underestimation of candidate relevance.
+
+Why 0.65 is practical here:
+- Exact matches are already handled separately with similarity = 1.0.
+- Semantic stage is only for non-exact skills, so it should be moderately strict.
+- 0.65 keeps semantically close terms while filtering weaker overlaps.
+- It provides stable behavior without making the system too permissive.
+
+Research/engineering framing for guide:
+- This is a precision-recall tradeoff decision.
+- Lower threshold -> higher recall, lower precision.
+- Higher threshold -> higher precision, lower recall.
+- 0.65 is chosen as an operating point for balanced performance.
+
+How to justify scientifically in future versions:
+1. Build a labeled dataset of skill pairs (match / non-match).
+2. Sweep thresholds from 0.50 to 0.85.
+3. Compute precision, recall, F1 for each threshold.
+4. Pick threshold with best F1 (or business-preferred precision).
+5. Keep threshold configurable via environment variable.
+
+One-line viva answer:
+"I chose 0.65 because it gives a balanced precision-recall tradeoff: lower values caused false matches, higher values missed genuinely related skills."
+
+============================================================
+4) LIKELY QUESTIONS YOUR GUIDE MAY ASK (WITH ANSWERS)
+============================================================
+
+Q1. What exactly happens after I click analyze?
+A. First resume parsing, second JD analysis, third semantic + ATS scoring. Then all outputs are saved in session storage and rendered on dashboard.
+
+Q2. Is your ATS score from a real ATS product?
+A. No. It is a custom deterministic compatibility score based on section completeness, keyword coverage/density, readability, and formatting.
+
+Q3. Why do you need sentence transformers if you already extract keywords?
+A. Keywords alone fail on synonyms/paraphrases. Sentence transformers add semantic matching so we evaluate meaning, not just exact terms.
+
+Q4. Where is AI/LLM used and where is it not used?
+A. LLM is used for resume generation/tailoring. Core scoring (match, ATS, keyword analysis, missing skills) is deterministic + embedding based.
+
+Q5. How do you compute semantic skill match?
+A. Exact normalized matches are marked first. For remaining skills, cosine similarity is computed on embeddings. If similarity >= 0.65, it is a partial match.
+
+Q6. Why threshold 0.65 for partial matches?
+A. It is a practical boundary to accept semantic closeness while reducing false positives. It can be tuned after evaluation on sample resumes/JDs.
+
+Q7. How do you compute overall match score?
+A. overall = 0.5 * weighted section average + 0.5 * skillScore.
+Section average uses skills 35%, experience 35%, projects 15%, education 15%.
+
+Q8. How do you detect missing skills?
+A. Required JD skills not covered in resume extracted skills are flagged; each gets importance classification using frequency and context rules.
+
+Q9. How reliable is section extraction from resumes?
+A. It is heuristic/rule-based on common headers. Strong for standard resumes, weaker for highly creative layouts. Contact fallback tries first lines for email/phone.
+
+Q10. What file formats are supported?
+A. PDF and DOCX (also doc extension accepted in validation).
+
+Q11. What are current input constraints?
+A. Resume max 10MB. JD minimum length is 20 characters.
+
+Q12. How do you avoid ATS-unfriendly formats?
+A. Formatting score penalizes excessive special characters, table-like tab usage, too few bullets, and very long lines.
+
+Q13. How is readability measured?
+A. Flesch Reading Ease approximation from sentence length and syllable complexity, then mapped to a 0-100 resume-friendly band score.
+
+Q14. Why not use LLM for ATS scoring too?
+A. Deterministic scoring is reproducible, explainable, and cheaper. LLM scoring can vary and is harder to audit.
+
+Q15. How do you ensure performance with embeddings?
+A. The embedding pipeline is lazily initialized once (singleton). Batch embedding computation is used for skill comparisons.
+
+Q16. What are known limitations?
+A. Rule-based parsing may miss unusual section headers; keyword include checks may miss deep context; scoring is a proxy and not equivalent to every ATS vendor.
+
+Q17. How can this be improved next?
+A. Add calibration dataset, section parser confidence scores, benchmark thresholds, and user feedback loop for accepted/rejected applications.
+
+Q18. How do you explain this project in one line?
+A. It is a deterministic + semantic AI resume intelligence system that scores JD fit, explains gaps, and can generate ATS-optimized tailored resumes.
+
+============================================================
+5) 90-SECOND PRESENTATION SCRIPT (READY TO SAY)
+============================================================
+
+"When a user uploads a resume, our backend first parses the PDF/DOCX and converts it into structured sections like skills, experience, projects, and education. In parallel, we parse the job description to extract required skills, tools, and experience requirements.
+
+Then our match engine computes semantic similarity using sentence-transformer embeddings, not just raw keyword overlap. So even if wording differs, we still detect relevant matches. Along with this, we compute missing skills, keyword alignment, and a deterministic ATS compatibility score.
+
+Our ATS score is a weighted formula: 25% section completeness, 30% keyword presence, 15% keyword density, 15% readability, and 15% formatting quality. This gives an explainable 0-100 compatibility index.
+
+Finally, all analysis results are shown in the dashboard. If the user chooses tailoring, we rank JD keywords by semantic importance and use LLM generation to produce an ATS-optimized resume while preserving deterministic scoring for evaluation." 
+
+============================================================
+6) KEY DIFFERENTIATOR TO HIGHLIGHT TO GUIDE
+============================================================
+
+- Scoring is mostly deterministic and explainable.
+- Semantic embeddings improve matching quality beyond keyword systems.
+- LLM is used in a controlled way for generation, not for core scoring.
+- System gives actionable outputs: match score, ATS score, missing skills, and suggestions.

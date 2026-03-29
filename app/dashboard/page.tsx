@@ -23,6 +23,7 @@ import { MissingSkillsDisplay } from "@/components/dashboard/missing-skills";
 import { ImprovementsDisplay } from "@/components/dashboard/improvements";
 import { ATSScore } from "@/components/dashboard/ats-score";
 import { TailoredResume } from "@/components/dashboard/tailored-resume";
+import InterviewUpload from "@/components/interview/InterviewUpload";
 import { Sparkles, ArrowLeft, Loader2 } from "lucide-react";
 import type {
   ResumeData,
@@ -374,6 +375,13 @@ export default function DashboardPage() {
               </motion.div>
             </TabsContent>
           </Tabs>
+
+          <section className="mt-10">
+            <h2 className="text-xl font-bold mb-4">
+              Step 2: Interview Analysis
+            </h2>
+            <InterviewUpload initialResumeMatchScore={data.matchResult.overallScore as any} />
+          </section>
         </div>
       </main>
       <Footer />

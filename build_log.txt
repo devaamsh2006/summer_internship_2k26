@@ -1,0 +1,42 @@
+﻿  Γû▓ Next.js 14.2.35
+  - Environments: .env.local, .env
+
+   Creating an optimized production build ...
+ Γ£ô Compiled successfully
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/19) ...
+   Generating static pages (4/19) 
+   Generating static pages (9/19) 
+   Generating static pages (14/19) 
+ Γ£ô Generating static pages (19/19)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                              Size     First Load JS
+Γöî Γùï /                                    6.03 kB         145 kB
+Γö£ Γùï /_not-found                          876 B          88.5 kB
+Γö£ ╞Æ /api/analyze-jd                      0 B                0 B
+Γö£ ╞Æ /api/generate-latex                  0 B                0 B
+Γö£ ╞Æ /api/generate-resume                 0 B                0 B
+Γö£ ╞Æ /api/improve-resume                  0 B                0 B
+Γö£ ╞Æ /api/interview/analyze-all           0 B                0 B
+Γö£ ╞Æ /api/interview/combined-score        0 B                0 B
+Γö£ ╞Æ /api/interview/generate-questions    0 B                0 B
+Γö£ ╞Æ /api/interview/upload                0 B                0 B
+Γö£ ╞Æ /api/match-score                     0 B                0 B
+Γö£ ╞Æ /api/parse-resume                    0 B                0 B
+Γö£ ╞Æ /api/tailor-resume                   0 B                0 B
+Γö£ Γùï /builder                             6.97 kB         146 kB
+Γö£ Γùï /dashboard                           122 kB          261 kB
+Γö£ Γùï /practice-interview                  11.1 kB         150 kB
+Γöö Γùï /upload                              7.34 kB         146 kB
++ First Load JS shared by all            87.6 kB
+  Γö£ chunks/117-60af5358645ef71e.js       31.9 kB
+  Γö£ chunks/fd9d1056-d01e9804f4c81514.js  53.6 kB
+  Γöö other shared chunks (total)          2.06 kB
+
+
+Γùï  (Static)   prerendered as static content
+╞Æ  (Dynamic)  server-rendered on demand
+
